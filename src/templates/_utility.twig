@@ -1,0 +1,159 @@
+{% import "_includes/forms" as forms %}
+
+{% set modeOptions = [
+    { label: "Everything"|t("delete-cache-key"), value: "all" },
+    { label: "Cache keys and tags"|t("delete-cache-key"), value: "both" },
+    { label: "Cache keys only"|t("delete-cache-key"), value: "key" },
+    { label: "Cache tags only"|t("delete-cache-key"), value: "tag" },
+    { label: "Cache Flag flags only"|t("delete-cache-key"), value: "flag" }
+] %}
+
+<div id="delete-cache-key-utility">
+    {{ forms.selectField({
+        label: "Type"|t("delete-cache-key"),
+        id: "dck-mode",
+        name: "mode",
+        options: modeOptions,
+        value: "all"
+    }) }}
+
+    {{ forms.textField({
+        label: "Keyword or key"|t("delete-cache-key"),
+        instructions: "Use `*` or `%` as a wildcard. Exact cache keys are normalized through Craft; wildcard key search uses DB/Redis cache IDs."|t("delete-cache-key"),
+        id: "dck-pattern",
+        name: "pattern",
+        placeholder: "homepage*"
+    }) }}
+
+    <div class="buttons">
+        <button type="button" class="btn" data-dck-action="search">{{ "Search"|t("delete-cache-key") }}</button>
+        <button type="button" class="btn submit" data-dck-action="clear">{{ "Clear cache"|t("delete-cache-key") }}</button>
+    </div>
+
+    <div id="dck-status" class="readable" style="margin-top: 24px;"></div>
+
+    <table id="dck-results" class="data fullwidth hidden" style="margin-top: 16px;">
+        <thead>
+            <tr>
+                <th>{{ "Type"|t("delete-cache-key") }}</th>
+                <th>{{ "Key or tag"|t("delete-cache-key") }}</th>
+                <th>{{ "Details"|t("delete-cache-key") }}</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</div>
+
+{% js %}
+(() => {
+    const root = document.getElementById('delete-cache-key-utility');
+    const mode = root.querySelector('#dck-mode');
+    const pattern = root.querySelector('#dck-pattern');
+    const status = root.querySelector('#dck-status');
+    const table = root.querySelector('#dck-results');
+    const tbody = table.querySelector('tbody');
+    const searchUrl = {{ actionUrl('delete-cache-key/cache-keys/search')|json_encode|raw }};
+    const clearUrl = {{ actionUrl('delete-cache-key/cache-keys/clear')|json_encode|raw }};
+
+    const escapeHtml = (value) => String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+
+    const hasWildcard = (value) => value.includes('*') || value.includes('%');
+
+    const request = async (url) => {
+        const body = new FormData();
+        body.append('pattern', pattern.value);
+        body.append('mode', mode.value);
+        body.append('wildcard', hasWildcard(pattern.value) ? '1' : '0');
+
+        if (Craft.csrfTokenName && Craft.csrfTokenValue) {
+            body.append(Craft.csrfTokenName, Craft.csrfTokenValue);
+        }
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body
+        });
+
+        if (!response.ok) {
+            throw new Error(response.statusText || 'Request failed');
+        }
+
+        return response.json();
+    };
+
+    const renderSearch = (data) => {
+        const rows = [];
+
+        (data.keys || []).forEach((row) => {
+            rows.push(`<tr><td>Key</td><td><code>${escapeHtml(row.id)}</code></td><td>${escapeHtml(row.expires)}</td></tr>`);
+        });
+
+        (data.tags || []).forEach((row) => {
+            rows.push(`<tr><td>Tag</td><td><code>${escapeHtml(row.tag)}</code></td><td>${escapeHtml(row.label)}</td></tr>`);
+        });
+
+        (data.flags || []).forEach((row) => {
+            rows.push(`<tr><td>Cache Flag</td><td><code>${escapeHtml(row.flag)}</code></td><td>Flagged template caches</td></tr>`);
+        });
+
+        tbody.innerHTML = rows.join('');
+        table.classList.toggle('hidden', rows.length === 0);
+
+        const messages = data.messages || [];
+        const summary = rows.length === 1 ? '1 match found.' : `${rows.length} matches found.`;
+        status.innerHTML = [summary].concat(messages.map(escapeHtml)).join('<br>');
+    };
+
+    const renderClear = (data) => {
+        const keyCount = (data.deletedKeys || []).length;
+        const tagCount = (data.invalidatedTags || []).length;
+        const flagCount = (data.invalidatedFlags || []).length;
+        const messages = data.messages || [];
+        const parts = [
+            `${keyCount} cache key${keyCount === 1 ? '' : 's'} deleted.`,
+            `${tagCount} cache tag${tagCount === 1 ? '' : 's'} invalidated.`,
+            `${flagCount} Cache Flag flag${flagCount === 1 ? '' : 's'} invalidated.`
+        ];
+
+        status.innerHTML = parts.concat(messages.map(escapeHtml)).join('<br>');
+    };
+
+    root.querySelector('[data-dck-action="search"]').addEventListener('click', async () => {
+        status.textContent = 'Searching...';
+
+        try {
+            renderSearch(await request(searchUrl));
+        } catch (error) {
+            status.textContent = error.message;
+        }
+    });
+
+    root.querySelector('[data-dck-action="clear"]').addEventListener('click', async () => {
+        if (!pattern.value.trim()) {
+            status.textContent = 'Enter a cache key, keyword, or tag first.';
+            return;
+        }
+
+        if (!confirm('Clear matching cache entries?')) {
+            return;
+        }
+
+        status.textContent = 'Clearing...';
+
+        try {
+            renderClear(await request(clearUrl));
+        } catch (error) {
+            status.textContent = error.message;
+        }
+    });
+})();
+{% endjs %}

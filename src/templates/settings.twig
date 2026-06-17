@@ -1,0 +1,22 @@
+{% import "_includes/forms" as forms %}
+
+{{ forms.textareaField({
+    first: true,
+    label: "Registered cache tags"|t("delete-cache-key"),
+    instructions: "One tag per line. Use `custom-tag` or `My Custom Tag | custom-tag`."|t("delete-cache-key"),
+    id: "registeredTags",
+    name: "registeredTags",
+    value: settings.registeredTags,
+    rows: 8
+}) }}
+
+{{ forms.textField({
+    label: "Search result limit"|t("delete-cache-key"),
+    instructions: "Maximum number of cache keys or tags returned in the utility."|t("delete-cache-key"),
+    id: "searchLimit",
+    name: "searchLimit",
+    value: settings.searchLimit,
+    type: "number",
+    min: 1,
+    max: 1000
+}) }}
