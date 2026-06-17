@@ -5,7 +5,8 @@
     { label: "Cache keys and tags"|t("delete-cache-key"), value: "both" },
     { label: "Cache keys only"|t("delete-cache-key"), value: "key" },
     { label: "Cache tags only"|t("delete-cache-key"), value: "tag" },
-    { label: "Cache Flag flags only"|t("delete-cache-key"), value: "flag" }
+    { label: "Cache Flag flags only"|t("delete-cache-key"), value: "flag" },
+    { label: "All Cache Flag caches"|t("delete-cache-key"), value: "cacheflag-all" }
 ] %}
 
 <div id="delete-cache-key-utility">
@@ -120,9 +121,13 @@
         const messages = data.messages || [];
         const parts = [
             `${keyCount} cache key${keyCount === 1 ? '' : 's'} deleted.`,
-            `${tagCount} cache tag${tagCount === 1 ? '' : 's'} invalidated.`,
-            `${flagCount} Cache Flag flag${flagCount === 1 ? '' : 's'} invalidated.`
+            `${tagCount} cache tag invalidation request${tagCount === 1 ? '' : 's'} sent.`,
+            `${flagCount} Cache Flag flag invalidation request${flagCount === 1 ? '' : 's'} sent.`
         ];
+
+        if (data.invalidatedAllCacheFlag) {
+            parts.push('All Cache Flag caches invalidated.');
+        }
 
         status.innerHTML = parts.concat(messages.map(escapeHtml)).join('<br>');
     };
@@ -138,12 +143,16 @@
     });
 
     root.querySelector('[data-dck-action="clear"]').addEventListener('click', async () => {
-        if (!pattern.value.trim()) {
+        if (mode.value !== 'cacheflag-all' && !pattern.value.trim()) {
             status.textContent = 'Enter a cache key, keyword, or tag first.';
             return;
         }
 
-        if (!confirm('Clear matching cache entries?')) {
+        const confirmMessage = mode.value === 'cacheflag-all'
+            ? 'Clear all Cache Flag template caches?'
+            : 'Clear matching cache entries?';
+
+        if (!confirm(confirmMessage)) {
             return;
         }
 

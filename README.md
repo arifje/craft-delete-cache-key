@@ -24,10 +24,13 @@ The plugin adds a **Delete Cache Key** utility under Utilities.
 - Search registered cache tags.
 - Invalidate an exact cache tag or wildcard-matched registered cache tags.
 - Search saved Cache Flag flags and invalidate exact or wildcard-matched flags.
+- Clear all Cache Flag template caches when a cache was created without a specific flag.
 
 Cache key search works against normalized cache IDs. With DB cache, those IDs come from the cache table. With Redis cache, the plugin uses Redis `SCAN` and only returns keys matching the cache component's `keyPrefix` when a prefix is configured.
 
-Exact key deletion still normalizes the key through Craft. Wildcard key deletion requires a discoverable backend, currently DB cache or Redis cache.
+Exact key deletion normalizes the key through Craft. It also checks Craft/Cache Flag global template cache keys such as `template::my-key::1`, so a key like `global-categories` can clear a matching `{% cache globally using key "global-categories" %}` or `{% cacheflag globally using key "global-categories" %}` entry. Wildcard key deletion requires a discoverable backend, currently DB cache or Redis cache.
+
+Cache tag and Cache Flag flag clearing use Yii dependency invalidation. Craft and Cache Flag accept those invalidation requests even when no matching cached value currently exists, so the utility reports them as invalidation requests rather than confirmed physical deletions.
 
 ## Register Cache Tags
 
@@ -69,7 +72,7 @@ Clear wildcard matches:
 php craft delete-cache-key/cache-keys/clear "homepage*" --mode=both --wildcard=1
 ```
 
-Modes are `key`, `tag`, and `both`.
+Modes are `key`, `tag`, `flag`, `cacheflag-all`, `both`, and `all`.
 
 Use `--mode=flag` to invalidate Cache Flag flags, or `--mode=all` to include keys, tags, and Cache Flag flags.
 
@@ -85,4 +88,10 @@ Wildcard flag clearing searches the flags saved by Cache Flag's utility. Exact f
 
 ```bash
 php craft delete-cache-key/cache-keys/clear "somearbitraryflag" --mode=flag
+```
+
+If a Cache Flag template cache uses `using key` without `flagged`, there is no flag-specific dependency to invalidate. For global template caches, exact key clearing will also check the generated `template::<key>::<siteId>` storage key. For cold or path-specific Cache Flag caches, clear all flagged template caches:
+
+```bash
+php craft delete-cache-key/cache-keys/clear --mode=cacheflag-all
 ```

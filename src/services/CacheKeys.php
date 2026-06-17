@@ -19,6 +19,7 @@ class CacheKeys extends Component
     public const MODE_KEY = 'key';
     public const MODE_TAG = 'tag';
     public const MODE_FLAG = 'flag';
+    public const MODE_CACHEFLAG_ALL = 'cacheflag-all';
     public const MODE_BOTH = 'both';
 
     public function search(string $pattern, string $mode = self::MODE_ALL, ?int $limit = null): array
@@ -69,12 +70,13 @@ class CacheKeys extends Component
             'deletedKeys' => [],
             'invalidatedTags' => [],
             'invalidatedFlags' => [],
+            'invalidatedAllCacheFlag' => false,
             'messages' => [],
             'supportsKeySearch' => $this->supportsKeySearch(),
             'supportsCacheFlag' => $this->supportsCacheFlag(),
         ];
 
-        if ($pattern === '') {
+        if ($pattern === '' && !$this->includesCacheFlagAllMode($mode)) {
             $result['messages'][] = 'Enter a cache key, keyword, or tag first.';
             return $result;
         }
@@ -95,6 +97,12 @@ class CacheKeys extends Component
             $flagResult = $this->clearCacheFlagFlags($pattern, $wildcard);
             $result['invalidatedFlags'] = $flagResult['invalidatedFlags'];
             $result['messages'] = array_merge($result['messages'], $flagResult['messages']);
+        }
+
+        if ($this->includesCacheFlagAllMode($mode)) {
+            $allCacheFlagResult = $this->clearAllCacheFlagCaches();
+            $result['invalidatedAllCacheFlag'] = $allCacheFlagResult['invalidatedAllCacheFlag'];
+            $result['messages'] = array_merge($result['messages'], $allCacheFlagResult['messages']);
         }
 
         return $result;
@@ -189,10 +197,7 @@ class CacheKeys extends Component
                     $this->searchDbCacheKeys($pattern, null)
                 );
             } else {
-                $ids = array_values(array_unique([
-                    $cache->buildKey($pattern),
-                    $pattern,
-                ]));
+                $ids = $this->storageIdsForCacheKeys($cache, $this->exactCacheKeyCandidates($pattern));
             }
 
             $deleted = $this->deleteDbCacheIds($cache, $ids);
@@ -200,6 +205,8 @@ class CacheKeys extends Component
 
             if ($wildcard && empty($deleted)) {
                 $result['messages'][] = 'No matching DB cache keys were found.';
+            } elseif (!$wildcard && empty($deleted)) {
+                $result['messages'][] = 'No exact DB cache key was found. Global template cache keys were checked as well.';
             }
 
             return $result;
@@ -213,10 +220,7 @@ class CacheKeys extends Component
                     $this->searchRedisCacheKeys($pattern, null, false)
                 );
             } else {
-                $ids = array_values(array_unique([
-                    $cache->buildKey($pattern),
-                    $pattern,
-                ]));
+                $ids = $this->storageIdsForCacheKeys($cache, $this->exactCacheKeyCandidates($pattern));
             }
 
             $deleted = $this->deleteRedisCacheIds($cache, $ids);
@@ -224,6 +228,8 @@ class CacheKeys extends Component
 
             if ($wildcard && empty($deleted)) {
                 $result['messages'][] = 'No matching Redis cache keys were found.';
+            } elseif (!$wildcard && empty($deleted)) {
+                $result['messages'][] = 'No exact Redis cache key was found. Global template cache keys were checked as well.';
             }
 
             return $result;
@@ -234,13 +240,21 @@ class CacheKeys extends Component
             return $result;
         }
 
-        $existed = method_exists($cache, 'exists') ? $cache->exists($pattern) : null;
-        $cache->delete($pattern);
+        $deleted = [];
 
-        if ($existed === false) {
+        foreach ($this->exactCacheKeyCandidates($pattern) as $key) {
+            $existed = method_exists($cache, 'exists') ? $cache->exists($key) : null;
+            $cache->delete($key);
+
+            if ($existed !== false) {
+                $deleted[] = $key;
+            }
+        }
+
+        if (empty($deleted)) {
             $result['messages'][] = 'No cache entry was found for the exact key.';
         } else {
-            $result['deletedKeys'][] = $pattern;
+            $result['deletedKeys'] = array_values(array_unique($deleted));
         }
 
         return $result;
@@ -271,6 +285,8 @@ class CacheKeys extends Component
 
         if ($wildcard && empty($tags)) {
             $result['messages'][] = 'No registered cache tags matched the wildcard.';
+        } elseif (!$wildcard) {
+            $result['messages'][] = 'Cache tag invalidation was requested. Craft does not expose whether an arbitrary tag existed.';
         }
 
         return $result;
@@ -287,6 +303,8 @@ class CacheKeys extends Component
             $result['messages'][] = 'Cache Flag is not installed or is not available.';
             return $result;
         }
+
+        $knownFlags = $this->availableCacheFlagFlags();
 
         if ($wildcard) {
             $flags = array_map(
@@ -307,9 +325,10 @@ class CacheKeys extends Component
         }
 
         $service = $this->cacheFlagService();
+        $invalidated = true;
 
         if ($service && method_exists($service, 'invalidateFlaggedCachesByFlags')) {
-            $service->invalidateFlaggedCachesByFlags($flags);
+            $invalidated = (bool)$service->invalidateFlaggedCachesByFlags($flags);
         } else {
             TagDependency::invalidate(
                 Craft::$app->getCache(),
@@ -317,7 +336,48 @@ class CacheKeys extends Component
             );
         }
 
-        $result['invalidatedFlags'] = $flags;
+        if ($invalidated) {
+            $result['invalidatedFlags'] = $flags;
+        } else {
+            $result['messages'][] = 'Cache Flag did not accept the requested flag invalidation.';
+        }
+
+        if (!$wildcard) {
+            if ($knownFlags !== [] && !in_array($flags[0], $knownFlags, true)) {
+                $result['messages'][] = sprintf(
+                    'No saved Cache Flag flag named "%s" was found. Exact arbitrary flag invalidation was requested anyway.',
+                    $flags[0]
+                );
+            }
+
+            $result['messages'][] = 'If your Twig uses `using key` without `flagged`, choose "All Cache Flag caches" or add a matching `flagged` value.';
+        }
+
+        return $result;
+    }
+
+    private function clearAllCacheFlagCaches(): array
+    {
+        $result = [
+            'invalidatedAllCacheFlag' => false,
+            'messages' => [],
+        ];
+
+        if (!$this->supportsCacheFlag()) {
+            $result['messages'][] = 'Cache Flag is not installed or is not available.';
+            return $result;
+        }
+
+        $service = $this->cacheFlagService();
+
+        if ($service && method_exists($service, 'invalidateAllFlaggedCaches')) {
+            $service->invalidateAllFlaggedCaches();
+        } else {
+            TagDependency::invalidate(Craft::$app->getCache(), 'cacheflag');
+        }
+
+        $result['invalidatedAllCacheFlag'] = true;
+        $result['messages'][] = 'All Cache Flag template caches were invalidated via the `cacheflag` dependency tag.';
 
         return $result;
     }
@@ -325,11 +385,23 @@ class CacheKeys extends Component
     private function searchCacheKeys(string $pattern, ?int $limit): array
     {
         if ($this->supportsDbKeySearch()) {
-            return $this->searchDbCacheKeys($pattern, $limit);
+            $rows = $this->searchDbCacheKeys($pattern, $limit);
+
+            if ($pattern !== '' && !$this->hasWildcard($pattern)) {
+                $rows = $this->mergeCacheKeyRows($rows, $this->searchExactDbCacheKeys($pattern));
+            }
+
+            return $limit !== null ? array_slice($rows, 0, $limit) : $rows;
         }
 
         if ($this->supportsRedisKeySearch()) {
-            return $this->searchRedisCacheKeys($pattern, $limit);
+            $rows = $this->searchRedisCacheKeys($pattern, $limit);
+
+            if ($pattern !== '' && !$this->hasWildcard($pattern)) {
+                $rows = $this->mergeCacheKeyRows($rows, $this->searchExactRedisCacheKeys($pattern));
+            }
+
+            return $limit !== null ? array_slice($rows, 0, $limit) : $rows;
         }
 
         return [];
@@ -428,6 +500,91 @@ class CacheKeys extends Component
         return $rows;
     }
 
+    private function searchExactDbCacheKeys(string $pattern): array
+    {
+        $cache = Craft::$app->getCache();
+
+        if (!$cache instanceof YiiDbCache) {
+            return [];
+        }
+
+        $ids = $this->storageIdsForCacheKeys($cache, $this->exactCacheKeyCandidates($pattern));
+
+        if (empty($ids)) {
+            return [];
+        }
+
+        $db = $this->dbConnection($cache);
+        $query = (new Query())
+            ->select(['id', 'expire'])
+            ->from($cache->cacheTable)
+            ->where(['id' => $ids])
+            ->andWhere(['or', ['expire' => 0], ['>', 'expire', time()]])
+            ->orderBy(['id' => SORT_ASC]);
+
+        try {
+            $rows = $this->withoutQueryCache($db, static fn(Connection $db): array => $query->createCommand($db)->queryAll());
+        } catch (Throwable $e) {
+            Craft::warning("Unable to search exact DB cache keys: {$e->getMessage()}", __METHOD__);
+            return [];
+        }
+
+        return array_map(static function(array $row): array {
+            $expire = (int)($row['expire'] ?? 0);
+
+            return [
+                'id' => (string)$row['id'],
+                'expire' => $expire,
+                'expires' => $expire === 0 ? 'Never' : date('Y-m-d H:i:s', $expire),
+            ];
+        }, $rows);
+    }
+
+    private function searchExactRedisCacheKeys(string $pattern): array
+    {
+        $cache = Craft::$app->getCache();
+
+        if (!class_exists('yii\\redis\\Cache') || !$cache instanceof \yii\redis\Cache) {
+            return [];
+        }
+
+        $rows = [];
+        $redis = $cache->redis;
+        $ids = $this->storageIdsForCacheKeys($cache, $this->exactCacheKeyCandidates($pattern));
+
+        foreach ($ids as $id) {
+            if (!$this->isRedisCacheKey($cache, $id)) {
+                continue;
+            }
+
+            try {
+                if ((int)$redis->executeCommand('EXISTS', [$id]) > 0) {
+                    $rows[] = $this->redisKeyInfo($redis, $id);
+                }
+            } catch (Throwable $e) {
+                Craft::warning("Unable to search exact Redis cache key: {$e->getMessage()}", __METHOD__);
+            }
+        }
+
+        return $this->mergeCacheKeyRows($rows);
+    }
+
+    private function mergeCacheKeyRows(array ...$rowSets): array
+    {
+        $indexed = [];
+
+        foreach ($rowSets as $rows) {
+            foreach ($rows as $row) {
+                $indexed[(string)$row['id']] = $row;
+            }
+        }
+
+        $rows = array_values($indexed);
+        usort($rows, static fn(array $a, array $b): int => strcmp($a['id'], $b['id']));
+
+        return $rows;
+    }
+
     private function redisKeyInfo(object $redis, string $key): array
     {
         $ttl = $redis->executeCommand('TTL', [$key]);
@@ -474,6 +631,48 @@ class CacheKeys extends Component
         $keyPrefix = (string)$cache->keyPrefix;
 
         return $keyPrefix === '' || str_starts_with($key, $keyPrefix);
+    }
+
+    private function exactCacheKeyCandidates(string $pattern): array
+    {
+        $candidates = [$pattern];
+
+        if ($pattern !== '' && !str_starts_with($pattern, 'template::')) {
+            foreach ($this->siteIds() as $siteId) {
+                $candidates[] = "template::$pattern::$siteId";
+            }
+        }
+
+        return array_values(array_unique(array_filter($candidates, static fn(string $key): bool => $key !== '')));
+    }
+
+    private function storageIdsForCacheKeys(object $cache, array $keys): array
+    {
+        $ids = [];
+
+        foreach ($keys as $key) {
+            $ids[] = $key;
+
+            if (method_exists($cache, 'buildKey')) {
+                $ids[] = $cache->buildKey($key);
+            }
+        }
+
+        return array_values(array_unique(array_filter($ids, static fn(string $id): bool => $id !== '')));
+    }
+
+    private function siteIds(): array
+    {
+        try {
+            $sites = Craft::$app->getSites()->getAllSites();
+        } catch (Throwable) {
+            return [];
+        }
+
+        return array_values(array_unique(array_map(
+            static fn(object $site): int => (int)$site->id,
+            $sites
+        )));
     }
 
     private function searchRegisteredTags(string $pattern, ?int $limit): array
@@ -670,7 +869,7 @@ class CacheKeys extends Component
 
     private function normalizeMode(string $mode): string
     {
-        return in_array($mode, [self::MODE_ALL, self::MODE_KEY, self::MODE_TAG, self::MODE_FLAG, self::MODE_BOTH], true)
+        return in_array($mode, [self::MODE_ALL, self::MODE_KEY, self::MODE_TAG, self::MODE_FLAG, self::MODE_CACHEFLAG_ALL, self::MODE_BOTH], true)
             ? $mode
             : self::MODE_ALL;
     }
@@ -688,6 +887,11 @@ class CacheKeys extends Component
     private function includesFlagMode(string $mode): bool
     {
         return in_array($mode, [self::MODE_ALL, self::MODE_FLAG], true);
+    }
+
+    private function includesCacheFlagAllMode(string $mode): bool
+    {
+        return $mode === self::MODE_CACHEFLAG_ALL;
     }
 
     private function normalizeFlagList(array $flags): array

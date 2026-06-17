@@ -32,6 +32,10 @@ class CacheKeysController extends Controller
             $this->stdout(sprintf("[tag] %s (%s)\n", $row['tag'], $row['label']));
         }
 
+        foreach ($result['flags'] as $row) {
+            $this->stdout(sprintf("[cacheflag flag] %s\n", $row['flag']));
+        }
+
         foreach ($result['messages'] as $message) {
             $this->stderr($message . "\n");
         }
@@ -39,7 +43,7 @@ class CacheKeysController extends Controller
         return ExitCode::OK;
     }
 
-    public function actionClear(string $pattern): int
+    public function actionClear(string $pattern = ''): int
     {
         $result = Plugin::getInstance()->getCacheKeys()->clear($pattern, $this->mode, $this->wildcard);
 
@@ -48,7 +52,15 @@ class CacheKeysController extends Controller
         }
 
         foreach ($result['invalidatedTags'] as $tag) {
-            $this->stdout(sprintf("[invalidated tag] %s\n", $tag));
+            $this->stdout(sprintf("[tag invalidation requested] %s\n", $tag));
+        }
+
+        foreach ($result['invalidatedFlags'] as $flag) {
+            $this->stdout(sprintf("[cacheflag flag invalidation requested] %s\n", $flag));
+        }
+
+        if (!empty($result['invalidatedAllCacheFlag'])) {
+            $this->stdout("[all cacheflag caches invalidated]\n");
         }
 
         foreach ($result['messages'] as $message) {
