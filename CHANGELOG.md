@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1 - 2026-10-07
+
+- Restricted DB cache searches and deletions to the configured cache key prefix, including raw storage IDs.
+- Escaped literal underscores and backslashes in DB wildcard patterns.
+- Reported caught cache backend errors and partial failures in the utility and returned nonzero console exit codes.
+- Rejected invalid cache modes before any cache operation.
+- Added isolated regression checks runnable against Craft 4 and Craft 5 dependencies.
+
 ## 1.0.0 - 2026-06-17
 
 - Initial Craft 4 and Craft 5 compatible release.

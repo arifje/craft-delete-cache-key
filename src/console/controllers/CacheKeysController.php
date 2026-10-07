@@ -40,7 +40,11 @@ class CacheKeysController extends Controller
             $this->stderr($message . "\n");
         }
 
-        return ExitCode::OK;
+        foreach ($result['errors'] as $error) {
+            $this->stderr($error . "\n");
+        }
+
+        return $result['success'] ? ExitCode::OK : ExitCode::UNSPECIFIED_ERROR;
     }
 
     public function actionClear(string $pattern = ''): int
@@ -67,6 +71,10 @@ class CacheKeysController extends Controller
             $this->stderr($message . "\n");
         }
 
-        return ExitCode::OK;
+        foreach ($result['errors'] as $error) {
+            $this->stderr($error . "\n");
+        }
+
+        return $result['success'] ? ExitCode::OK : ExitCode::UNSPECIFIED_ERROR;
     }
 }

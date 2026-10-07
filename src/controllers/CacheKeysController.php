@@ -6,6 +6,8 @@ use arifje\deletecachekey\Plugin;
 use arifje\deletecachekey\utilities\DeleteCacheKey;
 use Craft;
 use craft\web\Controller;
+use InvalidArgumentException;
+use yii\web\BadRequestHttpException;
 use yii\web\ForbiddenHttpException;
 use yii\web\Response;
 
@@ -21,7 +23,11 @@ class CacheKeysController extends Controller
         $pattern = (string)$request->getBodyParam('pattern', '');
         $mode = (string)$request->getBodyParam('mode', 'all');
 
-        return $this->asJson(Plugin::getInstance()->getCacheKeys()->search($pattern, $mode));
+        try {
+            return $this->asJson(Plugin::getInstance()->getCacheKeys()->search($pattern, $mode));
+        } catch (InvalidArgumentException $e) {
+            throw new BadRequestHttpException($e->getMessage(), 0, $e);
+        }
     }
 
     public function actionClear(): Response
@@ -35,7 +41,11 @@ class CacheKeysController extends Controller
         $mode = (string)$request->getBodyParam('mode', 'all');
         $wildcard = (bool)$request->getBodyParam('wildcard', false);
 
-        return $this->asJson(Plugin::getInstance()->getCacheKeys()->clear($pattern, $mode, $wildcard));
+        try {
+            return $this->asJson(Plugin::getInstance()->getCacheKeys()->clear($pattern, $mode, $wildcard));
+        } catch (InvalidArgumentException $e) {
+            throw new BadRequestHttpException($e->getMessage(), 0, $e);
+        }
     }
 
     private function requireUtilityPermission(): void

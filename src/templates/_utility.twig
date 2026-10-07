@@ -85,7 +85,8 @@
         });
 
         if (!response.ok) {
-            throw new Error(response.statusText || 'Request failed');
+            const error = await response.json().catch(() => ({}));
+            throw new Error(response.status === 400 ? (error.message || Craft.t('delete-cache-key', 'Invalid request')) : Craft.t('delete-cache-key', 'Cache operation failed. It may be incomplete; check the logs for details.'));
         }
 
         return response.json();
@@ -109,8 +110,8 @@
         tbody.innerHTML = rows.join('');
         table.classList.toggle('hidden', rows.length === 0);
 
-        const messages = data.messages || [];
-        const summary = rows.length === 1 ? '1 match found.' : `${rows.length} matches found.`;
+        const messages = (data.errors || []).concat(data.messages || []);
+        const summary = data.success === false ? Craft.t('delete-cache-key', 'Search incomplete.') : (rows.length === 1 ? '1 match found.' : `${rows.length} matches found.`);
         status.innerHTML = [summary].concat(messages.map(escapeHtml)).join('<br>');
     };
 
@@ -118,7 +119,7 @@
         const keyCount = (data.deletedKeys || []).length;
         const tagCount = (data.invalidatedTags || []).length;
         const flagCount = (data.invalidatedFlags || []).length;
-        const messages = data.messages || [];
+        const messages = (data.errors || []).concat(data.messages || []);
         const parts = [
             `${keyCount} cache key${keyCount === 1 ? '' : 's'} deleted.`,
             `${tagCount} cache tag invalidation request${tagCount === 1 ? '' : 's'} sent.`,
@@ -127,6 +128,10 @@
 
         if (data.invalidatedAllCacheFlag) {
             parts.push('All Cache Flag caches invalidated.');
+        }
+
+        if (data.success === false) {
+            parts.unshift(Craft.t('delete-cache-key', 'Clearing incomplete. Some entries may remain cached.'));
         }
 
         status.innerHTML = parts.concat(messages.map(escapeHtml)).join('<br>');
